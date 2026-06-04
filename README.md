@@ -1,67 +1,67 @@
 # Claude Difficult MMLU-Pro Subset
 
-This repository contains a prepared subset of difficult MMLU-Pro questions for evaluation with Claude.
+This repository contains a prepared subset of difficult MMLU-Pro questions for Claude evaluation.
 
-The subset contains questions that were previously answered incorrectly by both Qwen and Llama. Each row in `claude_ready_prompts.csv` already includes a fully formatted prompt, so the runner only needs to read the `prompt` column, call Claude, and save the response.
+The subset contains **5,789 questions** that were answered incorrectly by both Qwen and Llama. Each row in `claude_ready_prompts.csv` already includes a fully formatted prompt, so no MMLU-Pro download, filtering, or prompt construction is needed before calling Claude.
 
 ## Files
 
-| File | Purpose |
-|---|---|
-| `claude_ready_prompts.csv` | Prepared 5,789-question subset with one Claude-ready prompt per row |
-| `run_claude_prompts.py` | Python script that calls Claude and saves results |
-| `claude_results.csv` | Output file created after running the script |
-| `claude_wrong_only.csv` | Output file created after running the script, containing only incorrect Claude answers |
+- `claude_ready_prompts.csv`  
+  Prepared input file. The `prompt` column is the exact text to send to Claude.
 
-## Default settings
+- `run_claude_prompts.py`  
+  Python script that reads the CSV, calls Claude, and saves the results.
 
-The runner uses these defaults:
+- `README.md`  
+  Setup and run instructions.
+
+## Default run settings
+
+The script uses these defaults:
 
 ```text
 MODEL_NAME = claude-sonnet-4-6
-TEMPERATURE = 0
-MAX_TOKENS = 600
-SAVE_EVERY = 50
-SLEEP_SECONDS = 0.5
+temperature = 0
+max_tokens = 600
+save every 50 newly processed questions
 ```
 
-These can be changed with environment variables.
+The script saves progress every 50 newly processed questions and once more at the end. If restarted, it skips question IDs already present in `claude_results.csv`.
 
 ## Setup
 
-Install the required packages:
+Clone the repository:
 
 ```bash
-pip install pandas anthropic
+git clone https://github.com/allegrafr/claude_difficult.git
+cd claude_difficult
 ```
 
-Set the Anthropic API key.
+Install the required Python packages:
 
-Unix-style shell:
+```bash
+pip install -r requirements.txt
+```
+
+Set `ANTHROPIC_API_KEY` in the environment using your preferred shell, credential manager, or lab setup.
+
+For example:
 
 ```bash
 export ANTHROPIC_API_KEY="your_key_here"
 ```
 
-Windows PowerShell:
+On Windows PowerShell, the equivalent is:
 
 ```powershell
 $env:ANTHROPIC_API_KEY="your_key_here"
 ```
 
-## Recommended test run
+## Run a small test
 
-Run a small 50-question test first:
-
-Unix-style shell:
+Please start with a 50-question test run:
 
 ```bash
-python run_claude_prompts.py claude_ready_prompts.csv --rows 50
-```
-
-Windows PowerShell:
-
-```powershell
 python run_claude_prompts.py claude_ready_prompts.csv --rows 50
 ```
 
@@ -72,39 +72,21 @@ claude_results.csv
 claude_wrong_only.csv
 ```
 
-Please check that Claude is returning valid JSON with this format:
+If the test output looks correct, delete those two test output files before running the full subset.
 
-```json
-{
-  "predicted_answer": "A",
-  "reasoning": "brief explanation"
-}
-```
-
-If the test output looks correct, delete the two test output files before running the full subset:
-
-```text
-claude_results.csv
-claude_wrong_only.csv
-```
-
-## Full run
-
-Run the full prepared subset:
+## Run the full subset
 
 ```bash
 python run_claude_prompts.py claude_ready_prompts.csv
 ```
 
-The script saves progress every 50 newly processed questions and once at the end.
-
-If the run stops midway, run the same command again. The script will skip question IDs already present in `claude_results.csv`.
-
 ## Output files
+
+The script creates two output files.
 
 ### `claude_results.csv`
 
-Full Claude results with these columns:
+Full results for all processed questions. Columns:
 
 ```text
 question_id
@@ -121,7 +103,7 @@ error
 
 ### `claude_wrong_only.csv`
 
-Only the questions Claude answered incorrectly, with these columns:
+Only the questions Claude answered incorrectly. Columns:
 
 ```text
 question_id
@@ -133,50 +115,30 @@ category
 source
 ```
 
-## Changing the model or settings
+## Optional overrides
 
-Use a different Claude model:
+The defaults can be changed with environment variables if needed.
 
-Unix-style shell:
-
-```bash
-MODEL_NAME="claude-opus-4-8" python run_claude_prompts.py claude_ready_prompts.csv --rows 50
-```
-
-Windows PowerShell:
-
-```powershell
-$env:MODEL_NAME="claude-opus-4-8"; python run_claude_prompts.py claude_ready_prompts.csv --rows 50
-```
-
-Change max output tokens:
-
-Unix-style shell:
+Example:
 
 ```bash
-MAX_TOKENS=1000 python run_claude_prompts.py claude_ready_prompts.csv --rows 50
+MODEL_NAME="claude-sonnet-4-6" MAX_TOKENS=1000 SAVE_EVERY=50 python run_claude_prompts.py claude_ready_prompts.csv --rows 50
 ```
 
-Windows PowerShell:
+Available overrides:
 
-```powershell
-$env:MAX_TOKENS="1000"; python run_claude_prompts.py claude_ready_prompts.csv --rows 50
+```text
+MODEL_NAME
+MAX_TOKENS
+SAVE_EVERY
+SLEEP_SECONDS
 ```
 
-Change save interval:
+## Files to send back
 
-Unix-style shell:
+After the run finishes, please send back:
 
-```bash
-SAVE_EVERY=25 python run_claude_prompts.py claude_ready_prompts.csv
+```text
+claude_results.csv
+claude_wrong_only.csv
 ```
-
-Windows PowerShell:
-
-```powershell
-$env:SAVE_EVERY="25"; python run_claude_prompts.py claude_ready_prompts.csv
-```
-
-## Notes for runner
-
-This script uses the official Anthropic Python SDK by default. If Claude is accessed through another backend, such as AWS Bedrock, Vertex AI, OpenRouter, or an internal lab endpoint, only the `call_claude()` function should need to be adapted. The CSV itself is already prepared and should not require preprocessing.
