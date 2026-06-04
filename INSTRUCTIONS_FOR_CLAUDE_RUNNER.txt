@@ -1,0 +1,85 @@
+CLAUDE MMLU-PRO SUBSET RUN INSTRUCTIONS
+
+Files in this package:
+1. claude_ready_prompts.csv
+   - Prepared subset of difficult MMLU-Pro questions.
+   - 5,789 rows.
+   - Each row already has a fully formatted prompt.
+
+2. run_claude_prompts.py
+   - Standard Python script using the official Anthropic Python SDK.
+   - Reads claude_ready_prompts.csv.
+   - Sends each row's prompt column to Claude.
+   - Saves output every 50 newly processed questions, plus once at the end.
+   - If restarted, it skips question IDs already present in claude_results.csv.
+
+Default model/setting
+- MODEL_NAME = claude-sonnet-4-6
+- temperature = 0
+- max_tokens = 600
+- save every 50 newly processed questions
+
+Output files created by the script:
+1. claude_results.csv
+   Columns: question_id, correct_answer, predicted_answer, reasoning, question, options, category, source, raw_response, error
+
+2. claude_wrong_only.csv
+   Only questions Claude answered incorrectly.
+   Columns: question_id, question, options, correct_answer, predicted_answer, category, source
+
+SETUP
+
+1. Put these files in the same folder:
+   - claude_ready_prompts.csv
+   - run_claude_prompts.py
+
+2. Install packages:
+   pip install pandas anthropic
+
+3. Set the Anthropic API key in the environment.
+
+   Unix-style shell:
+   export ANTHROPIC_API_KEY="your_key_here"
+
+   Windows PowerShell:
+   $env:ANTHROPIC_API_KEY="your_key_here"
+
+4. Run a 20-item test first.
+
+   Unix-style shell:
+   MAX_ROWS=20 python run_claude_prompts.py
+
+   Windows PowerShell:
+   $env:MAX_ROWS="20"; python run_claude_prompts.py
+
+5. Check the test outputs:
+   - claude_results.csv
+   - claude_wrong_only.csv
+
+6. If the test looks good, delete the two test output files before the full run:
+   - claude_results.csv
+   - claude_wrong_only.csv
+
+7. Run the full prepared subset:
+   python run_claude_prompts.py
+
+8. Send back:
+   - claude_results.csv
+   - claude_wrong_only.csv
+
+
+Change max output tokens:
+
+Unix-style shell:
+MAX_TOKENS=1000 python run_claude_prompts.py
+
+Windows PowerShell:
+$env:MAX_TOKENS="1000"; python run_claude_prompts.py
+
+Change save interval:
+
+Unix-style shell:
+SAVE_EVERY=50 python run_claude_prompts.py
+
+Windows PowerShell:
+$env:SAVE_EVERY="50"; python run_claude_prompts.py
