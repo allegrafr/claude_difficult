@@ -2,7 +2,7 @@
 
 This repository contains a prepared subset of difficult MMLU-Pro questions for Claude evaluation.
 
-The subset contains **5,789 questions** that were answered incorrectly by both Qwen and Llama. Each row in `claude_ready_prompts.csv` already includes a fully formatted prompt, so no MMLU-Pro download, filtering, or prompt construction is needed before calling Claude.
+The subset contains **5,789 questions** that were answered incorrectly by both Qwen and Llama. Each row in `claude_ready_prompts.csv` already includes a fully formatted prompt.
 
 ## Files
 
