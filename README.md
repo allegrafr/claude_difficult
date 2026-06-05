@@ -41,7 +41,17 @@ Install the required packages:
 pip install -r requirements.txt
 ```
 
-Set `ANTHROPIC_API_KEY` in your environment using your preferred shell, credential manager, or lab setup.
+Set `ANTHROPIC_API_KEY` in your environment:
+
+```powershell
+# Windows PowerShell
+$env:ANTHROPIC_API_KEY = "sk-ant-..."
+```
+
+```bash
+# Linux/macOS
+export ANTHROPIC_API_KEY=sk-ant-...
+```
 
 Run a 50-question test first:
 
@@ -49,10 +59,10 @@ Run a 50-question test first:
 python run_claude_prompts.py claude_ready_prompts.csv --rows 50
 ```
 
-If the test output looks correct, delete the two test output files and run the full subset:
+If the test output looks correct, clear the test output files and run the full subset:
 
 ```bash
-python run_claude_prompts.py claude_ready_prompts.csv
+python run_claude_prompts.py claude_ready_prompts.csv --clear
 ```
 
 ## Output files
@@ -74,7 +84,7 @@ The defaults can be changed with command-line arguments or environment variables
 Examples:
 
 ```bash
-python run_claude_prompts.py claude_ready_prompts.csv --rows 50 --max-tokens 1500 --save-every 50
+python run_claude_prompts.py claude_ready_prompts.csv --rows 50 --max-tokens 1500 --save-every 10
 ```
 
 ```bash

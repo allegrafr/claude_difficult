@@ -74,19 +74,27 @@ def get_correct_answer(row: pd.Series) -> str:
     return answer_from_index(row.get("answer_index", ""))
 
 
+def strip_code_fences(text: str) -> str:
+    return re.sub(r"```(?:json)?\s*|\s*```", " ", text).strip()
+
+
 def find_json_objects(text: str) -> List[Dict[str, Any]]:
     objects: List[Dict[str, Any]] = []
     decoder = json.JSONDecoder()
 
-    for match in re.finditer(r"\{", text):
-        start = match.start()
-        try:
-            obj, _ = decoder.raw_decode(text[start:])
-        except json.JSONDecodeError:
-            continue
+    for candidate in (text, strip_code_fences(text)):
+        for match in re.finditer(r"\{", candidate):
+            start = match.start()
+            try:
+                obj, _ = decoder.raw_decode(candidate[start:])
+            except json.JSONDecodeError:
+                continue
 
-        if isinstance(obj, dict):
-            objects.append(obj)
+            if isinstance(obj, dict):
+                objects.append(obj)
+
+        if objects:
+            break
 
     return objects
 
@@ -96,15 +104,24 @@ def extract_answer_from_text(text: str) -> str:
         r'"predicted_answer"\s*:\s*"?([A-J])"?',
         r"'predicted_answer'\s*:\s*'?([A-J])'?",
         r"predicted_answer\s*[:=]\s*([A-J])\b",
+        r"correct answer is\s+([A-J])\b",
         r"final answer\s*(?:is|:)\s*([A-J])\b",
-        r"answer\s*(?:is|:)\s*([A-J])\b",
+        r"answer\s*(?:is|:)\s*\(?([A-J])\)?",
+        r"\bchoose\s+([A-J])\b",
+        r"\bselect\s+([A-J])\b",
         r"\boption\s+([A-J])\b",
+        r"\b([A-J])\s+is correct\b",
     ]
 
     for pattern in patterns:
         match = re.search(pattern, text, flags=re.IGNORECASE)
         if match:
             return normalize_answer(match.group(1))
+
+    # Last resort: lone capital letter A-J on its own line or at end of text
+    match = re.search(r"(?:^|[\s\(\[])([A-J])(?:[\s\)\].,]|$)", text, flags=re.IGNORECASE | re.MULTILINE)
+    if match:
+        return normalize_answer(match.group(1))
 
     return ""
 
@@ -208,7 +225,14 @@ def main() -> None:
     parser.add_argument("--model", default=DEFAULT_MODEL_NAME, help="Claude model name")
     parser.add_argument("--max-tokens", type=int, default=DEFAULT_MAX_TOKENS, help="Max output tokens")
     parser.add_argument("--save-every", type=int, default=DEFAULT_SAVE_EVERY, help="Save after this many new rows")
+    parser.add_argument("--clear", action="store_true", help="Clear existing results before running")
     args = parser.parse_args()
+
+    if args.clear:
+        for path in (RESULTS_FILE, WRONG_ONLY_FILE):
+            if os.path.exists(path):
+                os.remove(path)
+                print(f"Cleared: {path}")
 
     df = pd.read_csv(args.input_csv)
 
@@ -229,7 +253,17 @@ def main() -> None:
         print("MOCK_MODE is on. No Anthropic API calls will be made.")
     else:
         if not api_key:
-            raise RuntimeError("ANTHROPIC_API_KEY is not set.")
+            print(
+                "\nError: ANTHROPIC_API_KEY is not set.\n"
+                "  Set it before running:\n"
+                "    Windows PowerShell:  $env:ANTHROPIC_API_KEY = 'sk-ant-...'\n"
+                "    Windows CMD:         set ANTHROPIC_API_KEY=sk-ant-...\n"
+                "    Linux/macOS:         export ANTHROPIC_API_KEY=sk-ant-...\n"
+                "\n"
+                "  Or run in mock mode (no API key needed):\n"
+                "    $env:MOCK_MODE = '1'\n"
+            )
+            raise SystemExit(1)
         client = Anthropic(api_key=api_key)
 
     results = existing_results
