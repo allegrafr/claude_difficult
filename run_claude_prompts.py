@@ -1,74 +1,190 @@
 import argparse
 import json
 import os
+import re
 import time
+from typing import Any, Dict, List, Optional
 
 import pandas as pd
 from anthropic import Anthropic
 
 
+DEFAULT_MODEL_NAME = os.environ.get("MODEL_NAME", "claude-sonnet-4-6")
+DEFAULT_MAX_TOKENS = int(os.environ.get("MAX_TOKENS", "1200"))
+DEFAULT_SAVE_EVERY = int(os.environ.get("SAVE_EVERY", "50"))
+DEFAULT_SLEEP_SECONDS = float(os.environ.get("SLEEP_SECONDS", "0"))
+MOCK_MODE = os.environ.get("MOCK_MODE", "0") == "1"
+
 RESULTS_FILE = "claude_results.csv"
 WRONG_ONLY_FILE = "claude_wrong_only.csv"
+LETTERS = "ABCDEFGHIJ"
 
-MODEL_NAME = os.environ.get("MODEL_NAME", "claude-sonnet-4-6")
-MAX_TOKENS = int(os.environ.get("MAX_TOKENS", "600"))
-SLEEP_SECONDS = float(os.environ.get("SLEEP_SECONDS", "0.5"))
-SAVE_EVERY = int(os.environ.get("SAVE_EVERY", "50"))
+SYSTEM_PROMPT = """
+You are completing a multiple-choice benchmark evaluation.
+Return exactly one valid JSON object and nothing else.
+Do not use markdown.
+Do not include text before or after the JSON.
+The JSON object must have exactly these keys:
+{
+  "predicted_answer": "A",
+  "reasoning": "brief explanation"
+}
+The predicted_answer value must be exactly one capital letter from A through J.
+""".strip()
 
 
-def normalize_answer(value):
-    if pd.isna(value):
+def normalize_answer(value: Any) -> str:
+    if value is None or pd.isna(value):
         return ""
 
-    value = str(value).strip().upper()
-    return value[0] if value else ""
+    text = str(value).strip().upper()
+    match = re.search(r"\b([A-J])\b", text)
+    if match:
+        return match.group(1)
+
+    if len(text) > 0 and text[0] in LETTERS:
+        return text[0]
+
+    return ""
 
 
-def extract_json(text):
-    text = str(text).strip()
-
+def answer_from_index(value: Any) -> str:
     try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        pass
+        index = int(float(value))
+    except Exception:
+        return ""
 
-    start = text.find("{")
-    end = text.rfind("}")
+    if 0 <= index < len(LETTERS):
+        return LETTERS[index]
 
-    if start != -1 and end != -1 and end > start:
+    return ""
+
+
+def get_correct_answer(row: pd.Series) -> str:
+    answer = normalize_answer(row.get("correct_answer", ""))
+
+    if answer:
+        return answer
+
+    answer = normalize_answer(row.get("answer", ""))
+
+    if answer:
+        return answer
+
+    return answer_from_index(row.get("answer_index", ""))
+
+
+def find_json_objects(text: str) -> List[Dict[str, Any]]:
+    objects: List[Dict[str, Any]] = []
+    decoder = json.JSONDecoder()
+
+    for match in re.finditer(r"\{", text):
+        start = match.start()
         try:
-            return json.loads(text[start : end + 1])
+            obj, _ = decoder.raw_decode(text[start:])
         except json.JSONDecodeError:
-            pass
+            continue
+
+        if isinstance(obj, dict):
+            objects.append(obj)
+
+    return objects
+
+
+def extract_answer_from_text(text: str) -> str:
+    patterns = [
+        r'"predicted_answer"\s*:\s*"?([A-J])"?',
+        r"'predicted_answer'\s*:\s*'?([A-J])'?",
+        r"predicted_answer\s*[:=]\s*([A-J])\b",
+        r"final answer\s*(?:is|:)\s*([A-J])\b",
+        r"answer\s*(?:is|:)\s*([A-J])\b",
+        r"\boption\s+([A-J])\b",
+    ]
+
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if match:
+            return normalize_answer(match.group(1))
+
+    return ""
+
+
+def parse_claude_response(raw_response: str) -> Dict[str, str]:
+    text = str(raw_response or "").strip()
+
+    objects = find_json_objects(text)
+    for obj in reversed(objects):
+        predicted = normalize_answer(obj.get("predicted_answer", ""))
+        reasoning = str(obj.get("reasoning", "")).strip()
+
+        if predicted:
+            return {
+                "predicted_answer": predicted,
+                "reasoning": reasoning,
+                "parse_status": "json",
+            }
+
+    recovered = extract_answer_from_text(text)
+    if recovered:
+        return {
+            "predicted_answer": recovered,
+            "reasoning": text,
+            "parse_status": "recovered_from_text",
+        }
 
     return {
         "predicted_answer": "",
         "reasoning": text,
+        "parse_status": "failed",
     }
 
 
-def call_claude(client, prompt):
+def call_claude(client: Optional[Anthropic], prompt: str, model_name: str, max_tokens: int) -> Dict[str, str]:
+    if MOCK_MODE:
+        return {
+            "raw_response": '{"predicted_answer": "A", "reasoning": "Mock response for local script testing."}',
+            "stop_reason": "mock",
+        }
+
+    if client is None:
+        raise RuntimeError("Anthropic client was not initialized.")
+
     response = client.messages.create(
-        model=MODEL_NAME,
-        max_tokens=MAX_TOKENS,
+        model=model_name,
+        max_tokens=max_tokens,
         temperature=0,
-        messages=[
-            {
-                "role": "user",
-                "content": prompt,
-            }
-        ],
+        system=SYSTEM_PROMPT,
+        messages=[{"role": "user", "content": prompt}],
     )
 
-    return response.content[0].text
+    raw_text = ""
+    for block in response.content:
+        if getattr(block, "type", None) == "text":
+            raw_text += block.text
+
+    return {
+        "raw_response": raw_text,
+        "stop_reason": str(getattr(response, "stop_reason", "")),
+    }
 
 
-def save_outputs(results):
+def load_existing_results(path: str) -> pd.DataFrame:
+    if os.path.exists(path):
+        return pd.read_csv(path)
+
+    return pd.DataFrame()
+
+
+def save_outputs(results: List[Dict[str, Any]]) -> None:
     results_df = pd.DataFrame(results)
     results_df.to_csv(RESULTS_FILE, index=False)
 
+    if results_df.empty:
+        pd.DataFrame().to_csv(WRONG_ONLY_FILE, index=False)
+        return
+
     wrong_df = results_df[
-        results_df["predicted_answer"] != results_df["correct_answer"]
+        results_df["predicted_answer"].fillna("") != results_df["correct_answer"].fillna("")
     ].copy()
 
     wrong_columns = [
@@ -81,125 +197,103 @@ def save_outputs(results):
         "source",
     ]
 
-    wrong_df[wrong_columns].to_csv(WRONG_ONLY_FILE, index=False)
+    existing_columns = [column for column in wrong_columns if column in wrong_df.columns]
+    wrong_df[existing_columns].to_csv(WRONG_ONLY_FILE, index=False)
 
 
-def load_existing_results():
-    if not os.path.exists(RESULTS_FILE):
-        return [], set()
-
-    existing = pd.read_csv(RESULTS_FILE)
-
-    if "question_id" not in existing.columns:
-        return [], set()
-
-    done_ids = set(existing["question_id"].astype(str))
-    return existing.to_dict("records"), done_ids
-
-
-def validate_input(df):
-    required_columns = [
-        "question_id",
-        "correct_answer",
-        "question",
-        "options",
-        "category",
-        "source",
-        "prompt",
-    ]
-
-    missing = [column for column in required_columns if column not in df.columns]
-
-    if missing:
-        raise ValueError(f"Input CSV is missing required columns: {missing}")
-
-
-def main():
-    parser = argparse.ArgumentParser(
-        description="Run Claude on a prepared CSV of prompts."
-    )
-    parser.add_argument(
-        "input_file",
-        help="Path to the prepared input CSV file, such as claude_ready_prompts.csv",
-    )
-    parser.add_argument(
-        "--rows",
-        type=int,
-        default=None,
-        metavar="N",
-        help="Maximum number of rows to process for a test run. Default: all rows.",
-    )
-
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Run prepared Claude prompts from a CSV file.")
+    parser.add_argument("input_csv", help="CSV file with a prompt column")
+    parser.add_argument("--rows", type=int, default=None, help="Optional number of rows to process")
+    parser.add_argument("--model", default=DEFAULT_MODEL_NAME, help="Claude model name")
+    parser.add_argument("--max-tokens", type=int, default=DEFAULT_MAX_TOKENS, help="Max output tokens")
+    parser.add_argument("--save-every", type=int, default=DEFAULT_SAVE_EVERY, help="Save after this many new rows")
     args = parser.parse_args()
 
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    df = pd.read_csv(args.input_csv)
 
-    if not api_key:
-        raise RuntimeError("ANTHROPIC_API_KEY is not set.")
-
-    client = Anthropic(api_key=api_key)
-
-    df = pd.read_csv(args.input_file)
-    validate_input(df)
+    if "prompt" not in df.columns:
+        raise ValueError("Input CSV must contain a prompt column.")
 
     if args.rows is not None:
         df = df.head(args.rows)
 
-    results, done_ids = load_existing_results()
-    processed_since_save = 0
+    existing_df = load_existing_results(RESULTS_FILE)
+    existing_results = existing_df.to_dict("records") if not existing_df.empty else []
+    completed_ids = set(str(row.get("question_id")) for row in existing_results)
 
-    for _, row in df.iterrows():
-        question_id = str(row["question_id"])
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    client: Optional[Anthropic] = None
 
-        if question_id in done_ids:
-            print(f"Skipping already completed question_id={question_id}")
+    if MOCK_MODE:
+        print("MOCK_MODE is on. No Anthropic API calls will be made.")
+    else:
+        if not api_key:
+            raise RuntimeError("ANTHROPIC_API_KEY is not set.")
+        client = Anthropic(api_key=api_key)
+
+    results = existing_results
+    newly_processed = 0
+
+    print(f"Input rows selected: {len(df)}")
+    print(f"Already completed: {len(completed_ids)}")
+    print(f"Model: {args.model}")
+    print(f"Max tokens: {args.max_tokens}")
+    print(f"Save every: {args.save_every}")
+
+    for index, row in df.iterrows():
+        question_id = str(row.get("question_id", index))
+
+        if question_id in completed_ids:
             continue
 
-        print(f"Running {len(results) + 1}/{len(df)} | question_id={question_id}")
+        print(f"Running row {index + 1}/{len(df)} | question_id={question_id}")
 
         raw_response = ""
-        predicted_answer = ""
-        reasoning = ""
+        stop_reason = ""
         error = ""
 
         try:
-            raw_response = call_claude(client, row["prompt"])
-            parsed = extract_json(raw_response)
-            predicted_answer = normalize_answer(parsed.get("predicted_answer", ""))
-            reasoning = str(parsed.get("reasoning", ""))
-        except Exception as e:
-            error = str(e)
-            reasoning = f"ERROR: {error}"
+            claude_output = call_claude(client, str(row["prompt"]), args.model, args.max_tokens)
+            raw_response = claude_output["raw_response"]
+            stop_reason = claude_output["stop_reason"]
+            parsed = parse_claude_response(raw_response)
+        except Exception as exc:
+            parsed = {"predicted_answer": "", "reasoning": "", "parse_status": "error"}
+            error = str(exc)
+
+        correct_answer = get_correct_answer(row)
 
         results.append(
             {
-                "question_id": row["question_id"],
-                "correct_answer": normalize_answer(row["correct_answer"]),
-                "predicted_answer": predicted_answer,
-                "reasoning": reasoning,
-                "question": row["question"],
-                "options": row["options"],
-                "category": row["category"],
-                "source": row["source"],
+                "question_id": question_id,
+                "correct_answer": correct_answer,
+                "predicted_answer": parsed["predicted_answer"],
+                "reasoning": parsed["reasoning"],
+                "parse_status": parsed["parse_status"],
+                "stop_reason": stop_reason,
+                "question": row.get("question", ""),
+                "options": row.get("options", ""),
+                "category": row.get("category", ""),
+                "source": row.get("source", row.get("src", "")),
                 "raw_response": raw_response,
                 "error": error,
             }
         )
 
-        done_ids.add(question_id)
-        processed_since_save += 1
+        completed_ids.add(question_id)
+        newly_processed += 1
 
-        if processed_since_save >= SAVE_EVERY:
+        if newly_processed % args.save_every == 0:
             save_outputs(results)
-            print(f"Progress saved after {processed_since_save} new questions.")
-            processed_since_save = 0
+            print(f"Saved progress after {newly_processed} new rows.")
 
-        time.sleep(SLEEP_SECONDS)
+        if DEFAULT_SLEEP_SECONDS > 0:
+            time.sleep(DEFAULT_SLEEP_SECONDS)
 
     save_outputs(results)
-
     print("Finished.")
-    print(f"Saved all results to: {RESULTS_FILE}")
+    print(f"Saved full results to: {RESULTS_FILE}")
     print(f"Saved wrong-only results to: {WRONG_ONLY_FILE}")
 
 

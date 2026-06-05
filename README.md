@@ -12,23 +12,21 @@ The subset contains **5,789 questions** that were answered incorrectly by both Q
 - `run_claude_prompts.py`  
   Python script that reads the CSV, calls Claude, and saves the results.
 
-- `README.md`  
-  Setup and run instructions.
+- `requirements.txt`  
+  Python packages needed to run the script.
 
-## Default run settings
-
-The script uses these defaults:
+## Default settings
 
 ```text
 MODEL_NAME = claude-sonnet-4-6
 temperature = 0
-max_tokens = 600
+max_tokens = 1200
 save every 50 newly processed questions
 ```
 
 The script saves progress every 50 newly processed questions and once more at the end. If restarted, it skips question IDs already present in `claude_results.csv`.
 
-## Setup
+## Setup and run
 
 Clone the repository:
 
@@ -37,44 +35,21 @@ git clone https://github.com/allegrafr/claude_difficult.git
 cd claude_difficult
 ```
 
-Install the required Python packages:
+Install the required packages:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-Set `ANTHROPIC_API_KEY` in the environment using your preferred shell, credential manager, or lab setup.
+Set `ANTHROPIC_API_KEY` in your environment using your preferred shell, credential manager, or lab setup.
 
-For example:
-
-```bash
-export ANTHROPIC_API_KEY="your_key_here"
-```
-
-On Windows PowerShell, the equivalent is:
-
-```powershell
-$env:ANTHROPIC_API_KEY="your_key_here"
-```
-
-## Run a small test
-
-Please start with a 50-question test run:
+Run a 50-question test first:
 
 ```bash
 python run_claude_prompts.py claude_ready_prompts.csv --rows 50
 ```
 
-This creates:
-
-```text
-claude_results.csv
-claude_wrong_only.csv
-```
-
-If the test output looks correct, delete those two test output files before running the full subset.
-
-## Run the full subset
+If the test output looks correct, delete the two test output files and run the full subset:
 
 ```bash
 python run_claude_prompts.py claude_ready_prompts.csv
@@ -82,50 +57,31 @@ python run_claude_prompts.py claude_ready_prompts.csv
 
 ## Output files
 
-The script creates two output files.
+The script creates:
 
-### `claude_results.csv`
+- `claude_results.csv`  
+  Full results with `question_id`, `correct_answer`, `predicted_answer`, `reasoning`, `parse_status`, `stop_reason`, `question`, `options`, `category`, `source`, `raw_response`, and `error`.
 
-Full results for all processed questions. Columns:
+- `claude_wrong_only.csv`  
+  Only the questions Claude answered incorrectly, with `question_id`, `question`, `options`, `correct_answer`, `predicted_answer`, `category`, and `source`.
 
-```text
-question_id
-correct_answer
-predicted_answer
-reasoning
-question
-options
-category
-source
-raw_response
-error
-```
+Please send both output files back after the run finishes.
 
-### `claude_wrong_only.csv`
+## Optional settings
 
-Only the questions Claude answered incorrectly. Columns:
+The defaults can be changed with command-line arguments or environment variables.
 
-```text
-question_id
-question
-options
-correct_answer
-predicted_answer
-category
-source
-```
-
-## Optional overrides
-
-The defaults can be changed with environment variables if needed.
-
-Example:
+Examples:
 
 ```bash
-MODEL_NAME="claude-sonnet-4-6" MAX_TOKENS=1000 SAVE_EVERY=50 python run_claude_prompts.py claude_ready_prompts.csv --rows 50
+python run_claude_prompts.py claude_ready_prompts.csv --rows 50 --max-tokens 1500 --save-every 50
 ```
 
-Available overrides:
+```bash
+MODEL_NAME="claude-sonnet-4-6" python run_claude_prompts.py claude_ready_prompts.csv --rows 50
+```
+
+Available environment variables:
 
 ```text
 MODEL_NAME
@@ -134,11 +90,10 @@ SAVE_EVERY
 SLEEP_SECONDS
 ```
 
-## Files to send back
+## Local mock test without an API key
 
-After the run finishes, please send back:
+This only tests the script flow and output files. It does not call Claude.
 
-```text
-claude_results.csv
-claude_wrong_only.csv
+```bash
+MOCK_MODE=1 python run_claude_prompts.py claude_ready_prompts.csv --rows 10
 ```
